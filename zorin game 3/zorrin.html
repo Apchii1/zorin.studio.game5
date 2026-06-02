@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>2D Платформер | Ваши ассеты</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            background: linear-gradient(145deg, #0a0f1e 0%, #0c1222 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Courier New', monospace;
+        }
+
+        .game-container {
+            padding: 20px;
+            border-radius: 48px;
+            background: rgba(0, 0, 0, 0.35);
+            box-shadow: 0 20px 35px rgba(0,0,0,0.4);
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            border-radius: 24px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            cursor: pointer;
+        }
+
+        .info-panel {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #1e2a2ecc;
+            backdrop-filter: blur(8px);
+            padding: 12px 24px;
+            border-radius: 60px;
+            color: #f7e05e;
+            font-weight: bold;
+            font-size: 1.3rem;
+            gap: 25px;
+        }
+
+        .stats {
+            display: flex;
+            gap: 32px;
+        }
+
+        .stats span {
+            background: #0f1a1f;
+            padding: 6px 18px;
+            border-radius: 32px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        button {
+            background: #e6b422;
+            border: none;
+            font-family: inherit;
+            font-weight: bold;
+            font-size: 1.1rem;
+            padding: 6px 22px;
+            border-radius: 40px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-shadow: 0 3px 0 #8b5e1a;
+            transform: translateY(-2px);
+        }
+
+        button:active {
+            transform: translateY(2px);
+            box-shadow: 0 1px 0 #8b5e1a;
+        }
+
+        .controls {
+            text-align: center;
+            margin-top: 16px;
+            color: #bbb;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+<div>
+    <div class="game-container">
+        <canvas id="gameCanvas" width="900" height="550"></canvas>
+        <div class="info-panel">
+            <div>🏆 УРОВЕНЬ <span id="levelNum">1</span></div>
+            <div class="stats">
+                <span>💰 <span id="coinCounter">0</span> / <span id="totalCoins">0</span></span>
+                <span>⭐ Очки: <span id="scoreValue">0</span></span>
+            </div>
+            <button id="resetBtn">🔄 Перезапуск</button>
+        </div>
+    </div>
+    <div class="controls">← → / A D | Пробел / ↑ — прыжок. Собери монеты и коснись флага!</div>
+</div>
+
+<script>
+    (function(){
+        // --- ЗАГРУЗКА ВАШИХ ИЗОБРАЖЕНИЙ (assets) ---
+        const playerImg = new Image();
+        const bgImg = new Image();
+        const coinImg = new Image();
+        const goalImg = new Image();
+        
+        // Указываем пути к вашим файлам (они лежат в той же папке)
+        playerImg.src = "player.png";
+        bgImg.src = "background.png";
+        coinImg.src = "coin.png";
+        goalImg.src = "goal.png";
+        
+        // Ждём загрузки хотя бы фона, но можно начинать и без них
+        let imagesLoaded = 0;
+        function imageLoaded() {
+            imagesLoaded++;
+            if(imagesLoaded === 4) console.log("Все ассеты загружены!");
+        }
+        playerImg.onload = imageLoaded;
+        bgImg.onload = imageLoaded;
+        coinImg.onload = imageLoaded;
+        goalImg.onload = imageLoaded;
+        
+        // ---------- CANVAS ----------
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // ---------- Игровые параметры ----------
+        const GRAVITY = 0.55;
+        const JUMP_POWER = -9.2;
+        const GROUND_Y = 500;
+        const PLAYER_WIDTH = 32;
+        const PLAYER_HEIGHT = 32;
+        
+        let currentLevel = 1;
+        let player = {
+            x: 100, y: 0, vx: 0, vy: 0,
+            width: PLAYER_WIDTH, height: PLAYER_HEIGHT,
+            grounded: false, facingRight: true
+        };
+        
+        let platforms = [];
+        let coins = [];
+        let goal = { x: 0, y: 0, active: true, width: 32, height: 32 };
+        let levelComplete = false;
+        let score = 0;
+        let coinsCollectedInLevel = 0;
+        let totalCoinsInLevel = 0;
+        
+        const keys = { left: false, right: false, jumpPressed: false, canJump: true };
+        
+        // ---------- ДАННЫЕ УРОВНЕЙ ----------
+        function getLevelData(level){
+            const baseGround = { x: 0, y: GROUND_Y, w: canvas.width, h: 15 };
+            
+            if(level === 1){
+                const platforms = [
+                    baseGround,
+                    { x: 120, y: 440, w: 80, h: 20 },
+                    { x: 280, y: 390, w: 70, h: 20 },
+                    { x: 450, y: 330, w: 90, h: 20 },
+                    { x: 650, y: 430, w: 70, h: 20 },
+                    { x: 780, y: 470, w: 55, h: 20 }
+                ];
+                const coinsData = [
+                    { x: 150, y: 415, w: 24, h: 24, collected: false },
+                    { x: 310, y: 360, w: 24, h: 24, collected: false },
+                    { x: 490, y: 300, w: 24, h: 24, collected: false },
+                    { x: 680, y: 400, w: 24, h: 24, collected: false },
+                    { x: 810, y: 440, w: 24, h: 24, collected: false },
+                    { x: 60, y: 470, w: 24, h: 24, collected: false }
+                ];
+                const goalPos = { x: 840, y: GROUND_Y - 32, active: true };
+                return { platforms, coins: coinsData, goal: goalPos };
+            }
+            else if(level === 2){
+                const platforms = [
+                    baseGround,
+                    { x: 50, y: 460, w: 100, h: 20 },
+                    { x: 220, y: 400, w: 80, h: 20 },
+                    { x: 380, y: 350, w: 60, h: 20 },
+                    { x: 520, y: 300, w: 70, h: 20 },
+                    { x: 700, y: 380, w: 90, h: 20 },
+                    { x: 820, y: 460, w: 70, h: 20 },
+                    { x: 120, y: 320, w: 65, h: 18 },
+                    { x: 600, y: 240, w: 80, h: 18 }
+                ];
+                const coinsData = [
+                    { x: 80, y: 435, w: 24, h: 24, collected: false },
+                    { x: 250, y: 372, w: 24, h: 24, collected: false },
+                    { x: 405, y: 322, w: 24, h: 24, collected: false },
+                    { x: 550, y: 272, w: 24, h: 24, collected: false },
+                    { x: 740, y: 350, w: 24, h: 24, collected: false },
+                    { x: 840, y: 432, w: 24, h: 24, collected: false },
+                    { x: 155, y: 292, w: 24, h: 24, collected: false },
+                    { x: 640, y: 210, w: 24, h: 24, collected: false },
+                    { x: 30, y: 485, w: 24, h: 24, collected: false }
+                ];
+                const goalPos = { x: 850, y: GROUND_Y - 32, active: true };
+                return { platforms, coins: coinsData, goal: goalPos };
+            }
+            else if(level === 3){
+                const platforms = [
+                    baseGround,
+                    { x: 0, y: 450, w: 70, h: 20 },
+                    { x: 160, y: 410, w: 80, h: 20 },
+                    { x: 320, y: 360, w: 70, h: 20 },
+                    { x: 470, y: 310, w: 65, h: 20 },
+                    { x: 620, y: 260, w: 85, h: 20 },
+                    { x: 780, y: 340, w: 70, h: 20 },
+                    { x: 520, y: 180, w: 75, h: 20 },
+                    { x: 250, y: 270, w: 60, h: 20 }
+                ];
+                const coinsData = [
+                    { x: 30, y: 422, w: 24, h: 24, collected: false },
+                    { x: 190, y: 382, w: 24, h: 24, collected: false },
+                    { x: 350, y: 332, w: 24, h: 24, collected: false },
+                    { x: 500, y: 280, w: 24, h: 24, collected: false },
+                    { x: 655, y: 230, w: 24, h: 24, collected: false },
+                    { x: 810, y: 310, w: 24, h: 24, collected: false },
+                    { x: 560, y: 150, w: 24, h: 24, collected: false },
+                    { x: 285, y: 240, w: 24, h: 24, collected: false },
+                    { x: 120, y: 475, w: 24, h: 24, collected: false },
+                    { x: 750, y: 460, w: 24, h: 24, collected: false }
+                ];
+                const goalPos = { x: 860, y: GROUND_Y - 32, active: true };
+                return { platforms, coins: coinsData, goal: goalPos };
+            }
+            return getLevelData(1);
+        }
+        
+        function loadLevel(level){
+            const data = getLevelData(level);
+            platforms = data.platforms;
+            coins = data.coins.map(c => ({ ...c, collected: false }));
+            totalCoinsInLevel = coins.length;
+            coinsCollectedInLevel = 0;
+            goal = { ...data.goal, active: true, width: 32, height: 32 };
+            player.x = 70;
+            player.y = GROUND_Y - PLAYER_HEIGHT;
+            player.vx = 0;
+            player.vy = 0;
+            player.grounded = true;
+            levelComplete = false;
+            updateUI();
+        }
+        
+        function collideRect(r1, r2){
+            return !(r2.x > r1.x + r1.w || r2.x + r2.w < r1.x ||
+                r2.y > r1.y + r1.h || r2.y + r2.h < r1.y);
+        }
+        
+        function handleMovement(){
+            player.vy += GRAVITY;
+            let acc = 0;
+            if(keys.left) acc = -0.55;
+            if(keys.right) acc = 0.55;
+            player.vx += acc;
+            player.vx *= 0.98;
+            if(Math.abs(player.vx) > 5.2) player.vx = player.vx > 0 ? 5.2 : -5.2;
+            
+            player.x += player.vx;
+            if(player.x < 10) player.x = 10;
+            if(player.x + PLAYER_WIDTH > canvas.width - 10) player.x = canvas.width - PLAYER_WIDTH - 10;
+            
+            for(let plat of platforms){
+                if(collideRect({x:player.x, y:player.y, w:PLAYER_WIDTH, h:PLAYER_HEIGHT}, {x:plat.x, y:plat.y, w:plat.w, h:plat.h})){
+                    if(player.vx > 0) player.x = plat.x - PLAYER_WIDTH;
+                    else if(player.vx < 0) player.x = plat.x + plat.w;
+                }
+            }
+            
+            player.y += player.vy;
+            player.grounded = false;
+            for(let plat of platforms){
+                if(collideRect({x:player.x, y:player.y, w:PLAYER_WIDTH, h:PLAYER_HEIGHT}, {x:plat.x, y:plat.y, w:plat.w, h:plat.h})){
+                    if(player.vy >= 0 && (player.y + PLAYER_HEIGHT - player.vy) <= plat.y + 10){
+                        player.y = plat.y - PLAYER_HEIGHT;
+                        player.vy = 0;
+                        player.grounded = true;
+                    }
+                    else if(player.vy < 0){
+                        player.y = plat.y + plat.h;
+                        player.vy = 0;
+                    }
+                }
+            }
+            
+            if(player.y + PLAYER_HEIGHT > canvas.height + 50) resetLevel();
+            
+            if(keys.jumpPressed && player.grounded && keys.canJump){
+                player.vy = JUMP_POWER;
+                player.grounded = false;
+                keys.canJump = false;
+                setTimeout(() => { keys.canJump = true; }, 180);
+            }
+        }
+        
+        function handleCoins(){
+            for(let i=0; i<coins.length; i++){
+                const coin = coins[i];
+                if(coin.collected) continue;
+                const coinRect = { x: coin.x, y: coin.y, w: coin.w, h: coin.h };
+                const playerRect = { x: player.x, y: player.y, w: PLAYER_WIDTH, h: PLAYER_HEIGHT };
+                if(collideRect(playerRect, coinRect)){
+                    coin.collected = true;
+                    coinsCollectedInLevel++;
+                    score += 10;
+                    updateUI();
+                }
+            }
+        }
+        
+        function handleGoal(){
+            if(levelComplete || !goal.active) return;
+            const goalRect = { x: goal.x, y: goal.y, w: goal.width, h: goal.height };
+            const playerRect = { x: player.x, y: player.y, w: PLAYER_WIDTH, h: PLAYER_HEIGHT };
+            if(collideRect(playerRect, goalRect)){
+                levelComplete = true;
+                goal.active = false;
+                setTimeout(() => {
+                    if(currentLevel < 3){
+                        currentLevel++;
+                        loadLevel(currentLevel);
+                    } else {
+                        if(confirm("Поздравляю! Вы прошли игру!\nНачать сначала?")){
+                            currentLevel = 1;
+                            score = 0;
+                            loadLevel(currentLevel);
+                        } else {
+                            loadLevel(currentLevel);
+                        }
+                    }
+                    updateUI();
+                }, 300);
+            }
+        }
+        
+        function resetLevel(){
+            score = Math.max(0, score - (coinsCollectedInLevel * 10));
+            loadLevel(currentLevel);
+            updateUI();
+        }
+        
+        function updateUI(){
+            document.getElementById('levelNum').innerText = currentLevel;
+            document.getElementById('coinCounter').innerText = coinsCollectedInLevel;
+            document.getElementById('totalCoins').innerText = totalCoinsInLevel;
+            document.getElementById('scoreValue').innerText = score;
+        }
+        
+        // ---------- ОТРИСОВКА С ВАШИМИ ИЗОБРАЖЕНИЯМИ ----------
+        function drawBackground(){
+            if(bgImg.complete && bgImg.naturalWidth > 0){
+                ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
+            } else {
+                // fallback градиент
+                const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                grad.addColorStop(0, "#87CEEB");
+                grad.addColorStop(1, "#F0E68C");
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+        
+        function drawPlatforms(){
+            for(let plat of platforms){
+                ctx.fillStyle = "#8B5A2B";
+                ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
+                ctx.fillStyle = "#CD853F";
+                ctx.fillRect(plat.x, plat.y-3, plat.w, 5);
+                ctx.fillStyle = "#5C3A1E";
+                for(let i=0;i<plat.w;i+=15){
+                    ctx.fillRect(plat.x+i+4, plat.y+5, 5, plat.h-10);
+                }
+            }
+            ctx.fillStyle = "#6B4C2C";
+            ctx.fillRect(0, GROUND_Y+8, canvas.width, 10);
+        }
+        
+        function drawCoins(){
+            for(let coin of coins){
+                if(coin.collected) continue;
+                if(coinImg.complete && coinImg.naturalWidth > 0){
+                    ctx.drawImage(coinImg, coin.x, coin.y, coin.w, coin.h);
+                } else {
+                    ctx.fillStyle = "#FFD700";
+                    ctx.beginPath();
+                    ctx.arc(coin.x+coin.w/2, coin.y+coin.h/2, coin.w/2, 0, Math.PI*2);
+                    ctx.fill();
+                }
+            }
+        }
+        
+        function drawGoal(){
+            if(!goal.active && levelComplete) return;
+            if(goalImg.complete && goalImg.naturalWidth > 0){
+                ctx.drawImage(goalImg, goal.x, goal.y, goal.width, goal.height);
+            } else {
+                ctx.fillStyle = "#FF4444";
+                ctx.fillRect(goal.x+12, goal.y, 8, goal.height);
+                ctx.fillStyle = "#FFAA44";
+                ctx.beginPath();
+                ctx.moveTo(goal.x+16, goal.y+5);
+                ctx.lineTo(goal.x+36, goal.y+16);
+                ctx.lineTo(goal.x+16, goal.y+27);
+                ctx.fill();
+            }
+        }
+        
+        function drawPlayer(){
+            if(playerImg.complete && playerImg.naturalWidth > 0){
+                ctx.drawImage(playerImg, player.x, player.y, PLAYER_WIDTH, PLAYER_HEIGHT);
+            } else {
+                ctx.fillStyle = "#4CAF50";
+                ctx.fillRect(player.x, player.y, PLAYER_WIDTH, PLAYER_HEIGHT);
+                ctx.fillStyle = "#2E7D32";
+                ctx.fillRect(player.x+4, player.y+4, 6, 8);
+                ctx.fillRect(player.x+PLAYER_WIDTH-10, player.y+4, 6, 8);
+            }
+        }
+        
+        function gameLoop(){
+            if(!levelComplete){
+                handleMovement();
+                handleCoins();
+                handleGoal();
+            }
+            drawBackground();
+            drawPlatforms();
+            drawCoins();
+            drawGoal();
+            drawPlayer();
+            
+            if(levelComplete){
+                ctx.font = "bold 28px 'Courier New'";
+                ctx.fillStyle = "#FFD700";
+                ctx.shadowColor = "black";
+                ctx.fillText("УРОВЕНЬ ПРОЙДЕН!", canvas.width/2-150, 100);
+                ctx.shadowColor = "transparent";
+            }
+            requestAnimationFrame(gameLoop);
+        }
+        
+        function handleKeyDown(e){
+            let key = e.key;
+            if(key === 'ArrowLeft' || key === 'a') keys.left = true;
+            if(key === 'ArrowRight' || key === 'd') keys.right = true;
+            if(key === 'ArrowUp' || key === ' ' || key === 'w'){
+                e.preventDefault();
+                if(!keys.jumpPressed) keys.jumpPressed = true;
+            }
+            if(key === 'r') resetLevel();
+        }
+        
+        function handleKeyUp(e){
+            let key = e.key;
+            if(key === 'ArrowLeft' || key === 'a') keys.left = false;
+            if(key === 'ArrowRight' || key === 'd') keys.right = false;
+            if(key === 'ArrowUp' || key === ' ' || key === 'w') keys.jumpPressed = false;
+        }
+        
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        document.getElementById('resetBtn').addEventListener('click', () => resetLevel());
+        
+        loadLevel(1);
+        gameLoop();
+    })();
+</script>
+</body>
+</html>
